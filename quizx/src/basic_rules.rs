@@ -26,12 +26,13 @@
 //! Note calling `X_unchecked` is allowed to make unsound ZX-diagram
 //! transformations, or even panic, if `check_X` doesn't return true.
 
+use crate::annealer::IteratorExt;
 use crate::graph::*;
 use crate::scalar::*;
-use std::iter::FromIterator;
-use num::Rational;
 use num::traits::Zero;
+use num::Rational;
 use rustc_hash::FxHashSet;
+use std::iter::FromIterator;
 
 /// Define a checked rule that takes 1 vertex
 macro_rules! checked_rule1 {
@@ -40,10 +41,14 @@ macro_rules! checked_rule1 {
         ///
         /// See e.g. [spider_fusion] for an example.
         pub fn $name(g: &mut impl GraphLike, v: V) -> bool {
-            if $check(g, v) { $unchecked(g, v); true }
-            else { false }
+            if $check(g, v) {
+                $unchecked(g, v);
+                true
+            } else {
+                false
+            }
         }
-    }
+    };
 }
 
 /// Define a checked rule that takes 2 vertices
@@ -53,10 +58,14 @@ macro_rules! checked_rule2 {
         ///
         /// See e.g. [spider_fusion] for an example.
         pub fn $name(g: &mut impl GraphLike, v0: V, v1: V) -> bool {
-            if $check(g, v0, v1) { $unchecked(g, v0, v1); true }
-            else { false }
+            if $check(g, v0, v1) {
+                $unchecked(g, v0, v1);
+                true
+            } else {
+                false
+            }
         }
-    }
+    };
 }
 
 /// Check [spider_fusion_unchecked] applies
@@ -79,12 +88,11 @@ macro_rules! checked_rule2 {
 /// assert!(!check_spider_fusion(&g, v1, v2));
 /// ```
 pub fn check_spider_fusion(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    v0 != v1 &&
-    g.edge_type_opt(v0,v1) == Some(EType::N) &&
-    ((g.vertex_type(v0) == VType::Z && g.vertex_type(v1) == VType::Z) ||
-     (g.vertex_type(v0) == VType::X && g.vertex_type(v1) == VType::X))
+    v0 != v1
+        && g.edge_type_opt(v0, v1) == Some(EType::N)
+        && ((g.vertex_type(v0) == VType::Z && g.vertex_type(v1) == VType::Z)
+            || (g.vertex_type(v0) == VType::X && g.vertex_type(v1) == VType::X))
 }
-
 
 /// Apply spider fusion
 ///
@@ -112,7 +120,7 @@ pub fn check_spider_fusion(g: &impl GraphLike, v0: V, v1: V) -> bool {
 /// assert_ne!(g.to_tensor4(), h.to_tensor4());
 /// ```
 pub fn spider_fusion_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
-    for (v,et) in Vec::from_iter(g.incident_edges(v1)) {
+    for (v, et) in Vec::from_iter(g.incident_edges(v1)) {
         if v != v0 {
             g.add_edge_smart(v0, v, et);
         }
@@ -151,8 +159,11 @@ pub fn spider_fusion_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
 /// ```
 pub fn spider_fusion(g: &mut impl GraphLike, v0: V, v1: V) -> bool {
     if check_spider_fusion(g, v0, v1) {
-        spider_fusion_unchecked(g, v0, v1); true
-    } else { false }
+        spider_fusion_unchecked(g, v0, v1);
+        true
+    } else {
+        false
+    }
 }
 
 /// Check [pi_copy_unchecked] applies
@@ -163,7 +174,7 @@ pub fn check_pi_copy(g: &impl GraphLike, v: V) -> bool {
     let ovt = match vt {
         VType::Z => VType::X,
         VType::X => VType::Z,
-        _ => return false
+        _ => return false,
     };
 
     // No pi-copy on empty spiders.
@@ -177,7 +188,7 @@ pub fn check_pi_copy(g: &impl GraphLike, v: V) -> bool {
         match g.edge_type(v, neighbor) {
             EType::N if g.vertex_type(neighbor) != ovt => return false,
             EType::H if g.vertex_type(neighbor) != vt => return false,
-            _ => ()
+            _ => (),
         }
     }
 
@@ -185,9 +196,9 @@ pub fn check_pi_copy(g: &impl GraphLike, v: V) -> bool {
 }
 
 /// Apply a pi-copy
-/// 
+///
 /// This will flip the phase of a spider by adding a pi phase
-/// to all its neighbours, assuming that they are either the 
+/// to all its neighbours, assuming that they are either the
 /// same color and connected by a Hadamard edge, or the opposite
 /// color and connected by a normal edge. In particular, this means
 /// that this rule can always be applied when the graph is in gh form.
@@ -208,10 +219,7 @@ checked_rule1!(check_pi_copy, pi_copy_unchecked, pi_copy);
 /// Check [remove_id_unchecked] applies
 pub fn check_remove_id(g: &impl GraphLike, v: V) -> bool {
     let vt = g.vertex_type(v);
-
-    (vt == VType::Z || vt == VType::X) &&
-        g.phase(v).is_zero() &&
-        g.degree(v) == 2
+    vt.is_xz() && g.phase(v).is_zero() && g.degree(v) == 2
 }
 
 /// Remove an arity-2 spider with phase 0
@@ -221,14 +229,12 @@ pub fn check_remove_id(g: &impl GraphLike, v: V) -> bool {
 /// original 2 edges, namely: {N,N} -> N, {N,H} -> H, and
 /// {H, H} -> N.
 pub fn remove_id_unchecked(g: &mut impl GraphLike, v: V) {
-    let nhd: Vec<(V,EType)> = g.incident_edges(v).collect();
-    let new_et =
-        match (nhd[0].1, nhd[1].1) {
-            (EType::N, EType::N) => EType::N,
-            (EType::N, EType::H) => EType::H,
-            (EType::H, EType::N) => EType::H,
-            (EType::H, EType::H) => EType::N,
-        };
+    let nhd = g.incident_edges(v).to_vec();
+    let new_et = if nhd[0].1 == nhd[1].1 {
+        EType::N
+    } else {
+        EType::H
+    };
     g.add_edge_smart(nhd[0].0, nhd[1].0, new_et);
     g.remove_vertex(v);
 }
@@ -238,7 +244,7 @@ checked_rule1!(check_remove_id, remove_id_unchecked, remove_id);
 /// Check [color_change_unchecked] applies
 pub fn check_color_change(g: &impl GraphLike, v: V) -> bool {
     let vt = g.vertex_type(v);
-    vt == VType::X || vt == VType::Z
+    matches!(vt, VType::X | VType::Z)
 }
 
 /// Change the color of a Z or X spider
@@ -249,7 +255,7 @@ pub fn color_change_unchecked(g: &mut impl GraphLike, v: V) {
     let vt = g.vertex_type(v);
     g.set_vertex_type(v, if vt == VType::X { VType::Z } else { VType::X });
     for w in Vec::from_iter(g.neighbors(v)) {
-        g.toggle_edge_type(v,w);
+        g.toggle_edge_type(v, w);
     }
 }
 
@@ -260,10 +266,10 @@ checked_rule1!(check_color_change, color_change_unchecked, color_change);
 /// The vertex must be Z, have a phase pi/2 or -pi/2, and be
 /// surrounded by H-edges connected to other Z spiders.
 pub fn check_local_comp(g: &impl GraphLike, v: V) -> bool {
-    g.vertex_type(v) == VType::Z &&
-    *g.phase(v).denom() == 2 &&
-    g.incident_edges(v).all(|(v0,et)|
-        g.vertex_type(v0) == VType::Z && et == EType::H)
+    g.vertex_type(v) == VType::Z
+        && *g.phase(v).denom() == 2
+        && g.incident_edges(v)
+            .all(|(v0, et)| g.vertex_type(v0) == VType::Z && et == EType::H)
 }
 
 /// Apply a local complementation
@@ -275,17 +281,17 @@ pub fn local_comp_unchecked(g: &mut impl GraphLike, v: V) {
     let p = g.phase(v);
 
     // add a totally connected graph of the nhd of v
-    let ns: Vec<V> = g.neighbors(v).collect();
+    let ns = g.neighbors(v).to_vec();
     for i in 0..ns.len() {
         g.add_to_phase(ns[i], -p);
-        for j in (i+1)..ns.len() {
+        for j in (i + 1)..ns.len() {
             g.add_edge_smart(ns[i], ns[j], EType::H);
         }
     }
     g.remove_vertex(v);
 
     let x = ns.len() as i32;
-    g.scalar_mut().mul_sqrt2_pow(((x-1)*(x-2))/2);
+    g.scalar_mut().mul_sqrt2_pow(((x - 1) * (x - 2)) / 2);
     g.scalar_mut().mul_phase(Rational::new(*p.numer(), 4));
 }
 
@@ -296,15 +302,15 @@ checked_rule1!(check_local_comp, local_comp_unchecked, local_comp);
 /// Both vertices must be Z, have a phase 0 or pi, and be
 /// surrounded by H-edges connected to other Z spiders.
 pub fn check_pivot(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    g.vertex_type(v0) == VType::Z &&
-    g.vertex_type(v1) == VType::Z &&
-    g.edge_type_opt(v0, v1) == Some(EType::H) &&
-    g.phase(v0).is_integer() &&
-    g.phase(v1).is_integer() &&
-    g.incident_edges(v0).all(|(w,et)|
-        g.vertex_type(w) == VType::Z && et == EType::H) &&
-    g.incident_edges(v1).all(|(w,et)|
-        g.vertex_type(w) == VType::Z && et == EType::H)
+    g.vertex_type(v0) == VType::Z
+        && g.vertex_type(v1) == VType::Z
+        && g.edge_type_opt(v0, v1) == Some(EType::H)
+        && g.phase(v0).is_integer()
+        && g.phase(v1).is_integer()
+        && g.incident_edges(v0)
+            .all(|(w, et)| g.vertex_type(w) == VType::Z && et == EType::H)
+        && g.incident_edges(v1)
+            .all(|(w, et)| g.vertex_type(w) == VType::Z && et == EType::H)
 }
 
 /// Apply pivoting to a pair of vertices
@@ -318,8 +324,8 @@ pub fn pivot_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
 
     // add a complete bipartite graph between the neighbors of v0
     // and the neighbors of v1
-    let ns0: Vec<V> = g.neighbors(v0).collect();
-    let ns1: Vec<V> = g.neighbors(v1).collect();
+    let ns0: Vec<V> = g.neighbors(v0).to_vec();
+    let ns1: Vec<V> = g.neighbors(v1).to_vec();
     // let mut z: i32 = 0; // the number of neighbors of v0 and v1
     for &n0 in &ns0 {
         g.add_to_phase(n0, p1);
@@ -343,7 +349,7 @@ pub fn pivot_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
     g.scalar_mut().mul_sqrt2_pow((x - 2) * (y - 2));
 
     if !p0.is_zero() && !p1.is_zero() {
-        g.scalar_mut().mul_phase(Rational::new(1,1));
+        g.scalar_mut().mul_phase(Rational::new(1, 1));
     }
 }
 
@@ -354,15 +360,18 @@ checked_rule2!(check_pivot, pivot_unchecked, pivot);
 /// If b is not a boundary, this is a noop. The new vertex will be connected
 /// to v by a Hadamard edge.
 fn unfuse_boundary(g: &mut impl GraphLike, v: V, b: V) {
-    if g.vertex_type(b) != VType::B { return; }
+    if g.vertex_type(b) != VType::B {
+        return;
+    }
     let vd = VData {
         ty: VType::Z,
         phase: Rational::zero(),
         row: g.row(v),
-        qubit: g.qubit(v) };
+        qubit: g.qubit(v),
+    };
     let v1 = g.add_vertex_with_data(vd);
     g.add_edge_with_type(v, v1, EType::H);
-    g.add_edge_with_type(v1, b, g.edge_type(v,b).opposite());
+    g.add_edge_with_type(v1, b, g.edge_type(v, b).inv());
     g.remove_edge(v, b);
 }
 
@@ -370,12 +379,15 @@ fn unfuse_boundary(g: &mut impl GraphLike, v: V, b: V) {
 ///
 /// If the vertex already has a Pauli phase, this is a noop.
 fn unfuse_gadget(g: &mut impl GraphLike, v: V) {
-    if g.phase(v).is_integer() { return; }
+    if g.phase(v).is_integer() {
+        return;
+    }
     let vd = VData {
         ty: VType::Z,
         phase: Rational::zero(),
         row: g.row(v),
-        qubit: g.qubit(v) };
+        qubit: g.qubit(v),
+    };
     let v1 = g.add_vertex_with_data(vd);
     let v2 = g.add_vertex_with_data(vd);
     g.set_phase(v2, g.phase(v));
@@ -391,15 +403,22 @@ fn unfuse_gadget(g: &mut impl GraphLike, v: V) {
 /// both vertices interior. Note that repeatedly applying `gen_pivot` with
 /// this checker will not always terminate.
 pub fn check_gen_pivot(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    if v0 == v1 { return false; }
-    if g.edge_type_opt(v0, v1) != Some(EType::H) { return false; }
+    if v0 == v1 {
+        return false;
+    }
+    if g.edge_type_opt(v0, v1) != Some(EType::H) {
+        return false;
+    }
 
-    for &v in &[v0,v1] {
-        if g.vertex_type(v) != VType::Z { return false; }
+    for &v in &[v0, v1] {
+        if g.vertex_type(v) != VType::Z {
+            return false;
+        }
         for (w, et) in g.incident_edges(v) {
             let t = g.vertex_type(w);
-            if !((t == VType::Z && et == EType::H) || t == VType::B)
-            { return false; }
+            if !((t == VType::Z && et == EType::H) || t == VType::B) {
+                return false;
+            }
         }
     }
 
@@ -409,16 +428,15 @@ pub fn check_gen_pivot(g: &impl GraphLike, v0: V, v1: V) -> bool {
 // check that a vertex is interior, has phase 0 or pi, and is not
 // a phase gadget
 fn is_interior_pauli(g: &impl GraphLike, v: V) -> bool {
-    g.phase(v).is_integer() &&
-        g.neighbors(v).all(|n| g.vertex_type(n) == VType::Z &&
-                               g.degree(n) > 1)
+    g.phase(v).is_integer()
+        && g.neighbors(v)
+            .all(|n| g.vertex_type(n) == VType::Z && g.degree(n) > 1)
 }
 
 // check that a vertex is interior, has phase 0 or pi, and is not
 // a phase gadget
 fn is_boundary_pauli(g: &impl GraphLike, v: V) -> bool {
-    g.phase(v).is_integer() &&
-        g.neighbors(v).any(|n| g.vertex_type(n) == VType::B)
+    g.phase(v).is_integer() && g.neighbors(v).any(|n| g.vertex_type(n) == VType::B)
 }
 
 /// Check gen_pivot applies and at least one vertex is interior Pauli
@@ -427,16 +445,12 @@ fn is_boundary_pauli(g: &impl GraphLike, v: V) -> bool {
 /// strictly decrease the number of interior Pauli vertices, hence it
 /// will terminate.
 pub fn check_gen_pivot_reduce(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    check_gen_pivot(g, v0, v1) &&
-        (is_interior_pauli(g, v0) || is_interior_pauli(g, v1))
+    check_gen_pivot(g, v0, v1) && (is_interior_pauli(g, v0) || is_interior_pauli(g, v1))
 }
-
 
 pub fn check_boundary_pivot(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    check_gen_pivot(g, v0, v1) &&
-        is_boundary_pauli(g, v0)
+    check_gen_pivot(g, v0, v1) && is_boundary_pauli(g, v0)
 }
-
 
 /// Generic version of the pivot rule
 ///
@@ -448,54 +462,71 @@ pub fn check_boundary_pivot(g: &impl GraphLike, v0: V, v1: V) -> bool {
 pub fn gen_pivot_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
     let nhd0 = g.neighbor_vec(v0);
     unfuse_gadget(g, v0);
-    for &n in &nhd0 { unfuse_boundary(g, v0, n); }
+    for &n in &nhd0 {
+        unfuse_boundary(g, v0, n);
+    }
 
     let nhd1 = g.neighbor_vec(v1);
     unfuse_gadget(g, v1);
-    for &n in &nhd1 { unfuse_boundary(g, v1, n); }
+    for &n in &nhd1 {
+        unfuse_boundary(g, v1, n);
+    }
 
     pivot_unchecked(g, v0, v1);
 
-   // for &n in nhd0.iter().chain(nhd1.iter()) {
-   //      if g.contains_vertex(n) {
-   //          if remove_id(g, n) { println!("REMOVED EXTRA: {}", n); }
-   //      }
-   //  }
+    // for &n in nhd0.iter().chain(nhd1.iter()) {
+    //      if g.contains_vertex(n) {
+    //          if remove_id(g, n) { println!("REMOVED EXTRA: {}", n); }
+    //      }
+    //  }
 }
 
 checked_rule2!(check_gen_pivot, gen_pivot_unchecked, gen_pivot);
 checked_rule2!(check_boundary_pivot, gen_pivot_unchecked, boundary_pivot);
 
 pub fn check_gadget_fusion(g: &impl GraphLike, v0: V, v1: V) -> bool {
-    if v0 == v1 { return false; }
+    if v0 == v1 {
+        return false;
+    }
 
-    let vs = [v0,v1];
+    let vs = [v0, v1];
     let mut nhd = [FxHashSet::default(), FxHashSet::default()];
 
     for i in 0..2 {
         let mut found_gphase = false;
-        for (n,et) in g.incident_edges(vs[i]) {
-            if et != EType::H { return false; }
-            if g.vertex_type(n) != VType::Z { return false; }
+        for (n, et) in g.incident_edges(vs[i]) {
+            if et != EType::H {
+                return false;
+            }
+            if g.vertex_type(n) != VType::Z {
+                return false;
+            }
             if g.degree(n) == 1 {
-                if found_gphase { return false; }
-                else { found_gphase = true; }
+                if found_gphase {
+                    return false;
+                } else {
+                    found_gphase = true;
+                }
             } else {
                 nhd[i].insert(n);
             }
         }
 
-        if !found_gphase { return false; }
+        if !found_gphase {
+            return false;
+        }
     }
 
     nhd[0] == nhd[1]
 }
 
 pub fn gadget_fusion_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
-    let gphase0 = g.neighbors(v0)
+    let gphase0 = g
+        .neighbors(v0)
         .find(|&n| g.degree(n) == 1)
         .expect("v0 isn't a gadget");
-    let gphase1 = g.neighbors(v1)
+    let gphase1 = g
+        .neighbors(v1)
         .find(|&n| g.degree(n) == 1)
         .expect("v1 isn't a gadget");
     g.add_to_phase(gphase0, g.phase(gphase1));
@@ -526,11 +557,11 @@ pub fn check_remove_pair(g: &impl GraphLike, v0: V, v1: V) -> bool {
     let t0 = g.vertex_type(v0);
     let t1 = g.vertex_type(v1);
 
-    g.neighbors(v0).len() == 1 &&
-        g.neighbors(v1).len() == 1 &&
-        (t0 == VType::Z || t0 == VType::X) &&
-        (t1 == VType::Z || t1 == VType::X) &&
-        g.connected(v0, v1)
+    g.neighbors(v0).len() == 1
+        && g.neighbors(v1).len() == 1
+        && t0.is_xz()
+        && t1.is_xz()
+        && g.connected(v0, v1)
 }
 
 /// Remove an isolated Z or X vertex and add it as a global scalar
@@ -547,10 +578,10 @@ pub fn remove_pair_unchecked(g: &mut impl GraphLike, v0: V, v1: V) {
     // different colors
     } else {
         let p2 = Rational::one() + &p0 + &p1;
-        *g.scalar_mut() *= ScalarN::one() +
-            ScalarN::from_phase(p0) +
-            ScalarN::from_phase(p1) +
-            ScalarN::from_phase(p2);
+        *g.scalar_mut() *= ScalarN::one()
+            + ScalarN::from_phase(p0)
+            + ScalarN::from_phase(p1)
+            + ScalarN::from_phase(p2);
         g.scalar_mut().mul_sqrt2_pow(-1);
     }
 
@@ -582,8 +613,8 @@ mod tests {
             g.add_vertex(VType::B),
         ];
 
-        g.set_phase(vs[2], Rational::new(1,2));
-        g.set_phase(vs[3], Rational::new(1,4));
+        g.set_phase(vs[2], Rational::new(1, 2));
+        g.set_phase(vs[3], Rational::new(1, 4));
 
         g.add_edge(vs[0], vs[2]);
         g.add_edge(vs[1], vs[2]);
@@ -607,7 +638,7 @@ mod tests {
 
         assert_eq!(g.to_tensor4(), h.to_tensor4());
 
-        assert_eq!(g.phase(vs[2]), Rational::new(3,4));
+        assert_eq!(g.phase(vs[2]), Rational::new(3, 4));
     }
 
     #[test]
@@ -625,8 +656,8 @@ mod tests {
             g.add_vertex(VType::B),
         ];
 
-        g.set_phase(vs[2], Rational::new(1,2));
-        g.set_phase(vs[3], Rational::new(1,4));
+        g.set_phase(vs[2], Rational::new(1, 2));
+        g.set_phase(vs[3], Rational::new(1, 4));
 
         g.add_edge(vs[0], vs[2]);
         g.add_edge(vs[1], vs[2]);
@@ -661,22 +692,22 @@ mod tests {
         println!("\n\nth =\n{}", th);
         assert_eq!(tg, th);
 
-        assert_eq!(g.phase(vs[2]), Rational::new(3,4));
+        assert_eq!(g.phase(vs[2]), Rational::new(3, 4));
     }
 
     #[test]
     fn local_comp_1() {
         let mut g = Graph::new();
         g.add_vertex(VType::Z);
-        g.set_phase(0, Rational::new(1,2));
+        g.set_phase(0, Rational::new(1, 2));
         g.add_vertex(VType::Z);
         g.add_vertex(VType::Z);
         g.add_vertex(VType::Z);
         g.add_vertex(VType::Z);
-        g.add_edge_with_type(0,1,EType::H);
-        g.add_edge_with_type(0,2,EType::H);
-        g.add_edge_with_type(0,3,EType::H);
-        g.add_edge_with_type(0,4,EType::H);
+        g.add_edge_with_type(0, 1, EType::H);
+        g.add_edge_with_type(0, 2, EType::H);
+        g.add_edge_with_type(0, 3, EType::H);
+        g.add_edge_with_type(0, 4, EType::H);
 
         let b1 = g.add_vertex(VType::B);
         let b2 = g.add_vertex(VType::B);
@@ -686,8 +717,8 @@ mod tests {
         g.add_edge_with_type(b2, 2, EType::H);
         g.add_edge_with_type(b3, 3, EType::H);
         g.add_edge_with_type(b4, 4, EType::H);
-        g.set_inputs(vec![b1,b2]);
-        g.set_outputs(vec![b3,b4]);
+        g.set_inputs(vec![b1, b2]);
+        g.set_outputs(vec![b3, b4]);
 
         assert_eq!(g.num_vertices(), 9);
         assert_eq!(g.num_edges(), 8);
@@ -706,30 +737,37 @@ mod tests {
         assert_eq!(tg, th);
 
         for i in 1..5 {
-            assert_eq!(g.phase(i), Rational::new(-1,2));
+            assert_eq!(g.phase(i), Rational::new(-1, 2));
         }
 
-        assert_eq!(*g.scalar(),
-            Scalar::sqrt2_pow((4-1)*(4-2)/2) *
-            Scalar::from_phase(Rational::new(1,4)));
+        assert_eq!(
+            *g.scalar(),
+            Scalar::sqrt2_pow((4 - 1) * (4 - 2) / 2) * Scalar::from_phase(Rational::new(1, 4))
+        );
 
         let h = g.clone();
         let fail = local_comp(&mut g, 1);
         assert!(!fail, "Local comp should not match");
-        assert_eq!(g,h);
+        assert_eq!(g, h);
     }
 
     #[test]
     fn pivot_1() {
         let mut g = Graph::new();
 
-        for _ in 0..7 { g.add_vertex(VType::Z); }
-        g.set_phase(3, Rational::new(1,1));
-        for i in 0..3 { g.add_edge_with_type(i, 3, EType::H); }
+        for _ in 0..7 {
+            g.add_vertex(VType::Z);
+        }
+        g.set_phase(3, Rational::new(1, 1));
+        for i in 0..3 {
+            g.add_edge_with_type(i, 3, EType::H);
+        }
         g.add_edge_with_type(3, 4, EType::H);
-        for i in 5..7 { g.add_edge_with_type(4, i, EType::H); }
+        for i in 5..7 {
+            g.add_edge_with_type(4, i, EType::H);
+        }
 
-       // g.set_inputs(vec![0,1,2]);
+        // g.set_inputs(vec![0,1,2]);
         // g.set_outputs(vec![5,6]);
 
         assert_eq!(g.num_vertices(), 7);
@@ -744,11 +782,11 @@ mod tests {
         assert_eq!(h.num_vertices(), 5);
         assert_eq!(h.num_edges(), 6);
 
-        assert_eq!(h.phase(0), Rational::new(0,1));
-        assert_eq!(h.phase(6), Rational::new(1,1));
+        assert_eq!(h.phase(0), Rational::new(0, 1));
+        assert_eq!(h.phase(6), Rational::new(1, 1));
 
-        let mut inputs: Vec<usize> = Vec::new();
-        let mut outputs: Vec<usize> = Vec::new();
+        let mut inputs: Vec<usize> = vec![];
+        let mut outputs: Vec<usize> = vec![];
         for i in 0..3 {
             let inp = g.add_vertex(VType::B);
             inputs.push(inp);
@@ -774,12 +812,18 @@ mod tests {
     fn pivot_2() {
         let mut g = Graph::new();
 
-        for _ in 0..7 { g.add_vertex(VType::Z); }
-        g.set_phase(3, Rational::new(1,1));
-        g.set_phase(4, Rational::new(1,1));
-        for i in 0..3 { g.add_edge_with_type(i, 3, EType::H); }
+        for _ in 0..7 {
+            g.add_vertex(VType::Z);
+        }
+        g.set_phase(3, Rational::new(1, 1));
+        g.set_phase(4, Rational::new(1, 1));
+        for i in 0..3 {
+            g.add_edge_with_type(i, 3, EType::H);
+        }
         g.add_edge_with_type(3, 4, EType::H);
-        for i in 5..7 { g.add_edge_with_type(4, i, EType::H); }
+        for i in 5..7 {
+            g.add_edge_with_type(4, i, EType::H);
+        }
 
         assert_eq!(g.num_vertices(), 7);
         assert_eq!(g.num_edges(), 6);
@@ -790,21 +834,27 @@ mod tests {
         assert_eq!(g.num_vertices(), 5);
         assert_eq!(g.num_edges(), 6);
 
-        assert_eq!(g.phase(0), Rational::new(1,1));
-        assert_eq!(g.phase(6), Rational::new(1,1));
+        assert_eq!(g.phase(0), Rational::new(1, 1));
+        assert_eq!(g.phase(6), Rational::new(1, 1));
     }
 
     #[test]
     fn get_pivot_1() {
         let mut g = Graph::new();
 
-        for _ in 0..7 { g.add_vertex(VType::Z); }
+        for _ in 0..7 {
+            g.add_vertex(VType::Z);
+        }
         g.set_vertex_type(0, VType::B);
         // g.set_phase(3, Rational::new(1,1));
         // g.set_phase(4, Rational::new(1,1));
-        for i in 0..3 { g.add_edge_with_type(i, 3, EType::H); }
+        for i in 0..3 {
+            g.add_edge_with_type(i, 3, EType::H);
+        }
         g.add_edge_with_type(3, 4, EType::H);
-        for i in 5..7 { g.add_edge_with_type(4, i, EType::H); }
+        for i in 5..7 {
+            g.add_edge_with_type(4, i, EType::H);
+        }
         g.set_inputs(vec![0]);
 
         assert_eq!(g.num_vertices(), 7);
@@ -813,7 +863,6 @@ mod tests {
         let mut h = g.clone();
         let success = pivot(&mut h, 3, 4);
         assert!(!success, "Pivot should not match");
-
 
         let mut h = g.clone();
         let success = gen_pivot(&mut h, 3, 4);
@@ -828,12 +877,18 @@ mod tests {
     fn get_pivot_2() {
         let mut g = Graph::new();
 
-        for _ in 0..7 { g.add_vertex(VType::Z); }
-        g.set_phase(3, Rational::new(1,1));
-        g.set_phase(4, Rational::new(1,4));
-        for i in 0..3 { g.add_edge_with_type(i, 3, EType::H); }
+        for _ in 0..7 {
+            g.add_vertex(VType::Z);
+        }
+        g.set_phase(3, Rational::new(1, 1));
+        g.set_phase(4, Rational::new(1, 4));
+        for i in 0..3 {
+            g.add_edge_with_type(i, 3, EType::H);
+        }
         g.add_edge_with_type(3, 4, EType::H);
-        for i in 5..7 { g.add_edge_with_type(4, i, EType::H); }
+        for i in 5..7 {
+            g.add_edge_with_type(4, i, EType::H);
+        }
 
         assert_eq!(g.num_vertices(), 7);
         assert_eq!(g.num_edges(), 6);
@@ -841,7 +896,6 @@ mod tests {
         let mut h = g.clone();
         let success = pivot(&mut h, 3, 4);
         assert!(!success, "Pivot should not match");
-
 
         let mut h = g.clone();
         let success = gen_pivot(&mut h, 3, 4);
@@ -857,16 +911,20 @@ mod tests {
         // fuse gadgets of various sizes
         for n in 1..5 {
             let mut g = Graph::new();
-            let bs: Vec<_> = (0..n).map(|_| g.add_vertex(VType::B)).collect();
-            let vs: Vec<_> = (0..n).map(|_| g.add_vertex(VType::Z)).collect();
-            let gs: Vec<_> = (0..2).map(|_| g.add_vertex(VType::Z)).collect();
-            let ps: Vec<_> = (0..2).map(|_| g.add_vertex(VType::Z)).collect();
+            let bs = (0..n).map(|_| g.add_vertex(VType::B)).to_vec();
+            let vs = (0..n).map(|_| g.add_vertex(VType::Z)).to_vec();
+            let gs = (0..2).map(|_| g.add_vertex(VType::Z)).to_vec();
+            let ps = (0..2).map(|_| g.add_vertex(VType::Z)).to_vec();
             g.set_inputs(bs.clone());
 
-            for i in 0..n { g.add_edge(bs[i], vs[i]); }
+            for i in 0..n {
+                g.add_edge(bs[i], vs[i]);
+            }
             for j in 0..2 {
                 g.add_edge_with_type(gs[j], ps[j], EType::H);
-                for i in 0..n { g.add_edge_with_type(vs[i], gs[j], EType::H); }
+                for i in 0..n {
+                    g.add_edge_with_type(vs[i], gs[j], EType::H);
+                }
             }
 
             g.set_phase(ps[0], Rational::new(1, 4));
@@ -875,9 +933,15 @@ mod tests {
             let h = g.clone();
 
             assert!(gadget_fusion(&mut g, gs[0], gs[1]));
-            assert!(g.find_vertex(|v| g.phase(v) == Rational::new(3,4)).is_some());
-            assert!(g.find_vertex(|v| g.phase(v) == Rational::new(1,4)).is_none());
-            assert!(g.find_vertex(|v| g.phase(v) == Rational::new(1,2)).is_none());
+            assert!(g
+                .find_vertex(|v| g.phase(v) == Rational::new(3, 4))
+                .is_some());
+            assert!(g
+                .find_vertex(|v| g.phase(v) == Rational::new(1, 4))
+                .is_none());
+            assert!(g
+                .find_vertex(|v| g.phase(v) == Rational::new(1, 2))
+                .is_none());
             // println!("{}", g.to_tensor4());
             // println!("{}", h.to_tensor4());
             // println!("g = {} * \n {} \n\n", g.scalar(), g.to_dot());
@@ -890,7 +954,7 @@ mod tests {
     fn scalar_rules() {
         for &t in &[VType::Z, VType::X] {
             let mut g = Graph::new();
-            g.add_vertex_with_phase(t, Rational::new(1,4));
+            g.add_vertex_with_phase(t, Rational::new(1, 4));
             let mut h = g.clone();
             assert!(remove_single(&mut h, 0));
             assert_eq!(h.num_vertices(), 0, "h still has vertices");
@@ -901,13 +965,20 @@ mod tests {
             for &t1 in &[VType::Z, VType::X] {
                 for &et in &[EType::N, EType::H] {
                     let mut g = Graph::new();
-                    g.add_vertex_with_phase(t0, Rational::new(1,4));
-                    g.add_vertex_with_phase(t1, Rational::new(-1,2));
+                    g.add_vertex_with_phase(t0, Rational::new(1, 4));
+                    g.add_vertex_with_phase(t1, Rational::new(-1, 2));
                     g.add_edge_with_type(0, 1, et);
                     let mut h = g.clone();
                     assert!(remove_pair(&mut h, 0, 1));
                     assert_eq!(h.num_vertices(), 0, "h still has vertices");
-                    assert_eq!(g.to_tensor4(), h.to_tensor4(), "Eq failed on case: {:?}, {:?}, {:?}", t0, t1, et);
+                    assert_eq!(
+                        g.to_tensor4(),
+                        h.to_tensor4(),
+                        "Eq failed on case: {:?}, {:?}, {:?}",
+                        t0,
+                        t1,
+                        et
+                    );
                 }
             }
         }
@@ -923,7 +994,7 @@ mod tests {
             g.add_vertex_with_phase(VType::Z, 0.into()),
             g.add_vertex_with_phase(VType::X, (3, 2).into()),
             g.add_vertex_with_phase(VType::Z, (3, 4).into()),
-            g.add_vertex_with_phase(VType::B, 0.into())
+            g.add_vertex_with_phase(VType::B, 0.into()),
         ];
 
         g.set_inputs(vec![vs[6]]);
@@ -953,5 +1024,5 @@ mod tests {
     }
 }
 
-    // }}}
-    // vim:foldlevel=0:
+// }}}
+// vim:foldlevel=0:

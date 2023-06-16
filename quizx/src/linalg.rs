@@ -16,15 +16,12 @@
 
 //! Matrices and linear algebra over F2
 
-use std::fmt;
-use std::cmp::min;
 use rustc_hash::FxHashMap;
+use std::{cmp::min, fmt};
 
 /// A type for matrices over F2
-#[derive(PartialEq,Eq,Clone,Debug)]
-pub struct Mat2 {
-    d: Vec<Vec<u8>>
-}
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Mat2(Vec<Vec<u8>>);
 
 pub trait RowOps {
     /// Add r0 to r1
@@ -47,55 +44,58 @@ impl RowOps for () {
 }
 
 impl Mat2 {
-    pub fn new(d: Vec<Vec<u8>>) -> Mat2 {
-        Mat2 { d }
+    pub fn new(d: Vec<Vec<u8>>) -> Self {
+        Self(d)
     }
 
     /// Build a matrix with the given number of rows and columns. Place a 1
     /// wherever f(i,j) is true.
-    pub fn build<F>(rows: usize, cols: usize, f: F) -> Mat2
-        where F: Fn(usize, usize) -> bool
+    pub fn build<F>(rows: usize, cols: usize, f: F) -> Self
+    where
+        F: Fn(usize, usize) -> bool,
     {
-        Mat2 {
-            d: (0..rows).map(|x| (0..cols).map(|y|
-                   if f(x, y) { 1 } else { 0 })
-               .collect()).collect()
-        }
+        Self(
+            (0..rows)
+                .map(|x| (0..cols).map(|y| f(x, y).into()).collect())
+                .collect(),
+        )
     }
 
     /// A matrix full of zeros
-    pub fn zeros(rows: usize, cols: usize) -> Mat2 {
-        Mat2::build(rows, cols, |_,_| false)
+    pub fn zeros(rows: usize, cols: usize) -> Self {
+        Self::build(rows, cols, |_, _| false)
     }
 
     /// A matrix full of ones
-    pub fn ones(rows: usize, cols: usize) -> Mat2 {
-        Mat2::build(rows, cols, |_,_| true)
+    pub fn ones(rows: usize, cols: usize) -> Self {
+        Self::build(rows, cols, |_, _| true)
     }
 
     /// The identity matrix of a given size
-    pub fn id(dim: usize) -> Mat2 {
-        Mat2::build(dim, dim, |x,y| x == y)
+    pub fn id(dim: usize) -> Self {
+        Self::build(dim, dim, |x, y| x == y)
     }
 
     /// A column vector with a single 1 at the given index
-    pub fn unit_vector(dim: usize, i: usize) -> Mat2 {
-        Mat2::build(dim, 1, |x,_| x == i)
+    pub fn unit_vector(dim: usize, i: usize) -> Self {
+        Self::build(dim, 1, |x, _| x == i)
     }
 
     pub fn num_rows(&self) -> usize {
-        self.d.len()
+        self.0.len()
     }
 
     pub fn num_cols(&self) -> usize {
-        if self.d.len() > 0 { self.d[0].len() }
-        else { 0 }
+        if self.0.len() > 0 {
+            self.0[0].len()
+        } else {
+            0
+        }
     }
 
     /// Return the transpose as a copy
-    pub fn transpose(&self) -> Mat2 {
-        Mat2::build(self.num_cols(), self.num_rows(),
-                    |i,j| self[j][i] == 1)
+    pub fn transpose(&self) -> Self {
+        Self::build(self.num_cols(), self.num_rows(), |i, j| self[j][i] == 1)
     }
 
     /// Main function for computing the echelon form.
@@ -125,26 +125,33 @@ impl Mat2 {
     /// m' = id. So, g = m^-1 and x --> m^-1 * x.
     ///
     /// Note x and y need not be matrices, and can be any type that implements RowOps.
-    fn gauss_helper<T: RowOps>(&mut self, full_reduce: bool, blocksize: usize,
-                                  x: &mut T, pivot_cols: &mut Vec<usize>) -> usize
-    {
+    fn gauss_helper<T: RowOps>(
+        &mut self,
+        full_reduce: bool,
+        blocksize: usize,
+        x: &mut T,
+        pivot_cols: &mut Vec<usize>,
+    ) -> usize {
         let rows = self.num_rows();
         let cols = self.num_cols();
         let mut pivot_row = 0;
 
-        let num_blocks =
-            if cols % blocksize == 0 { cols / blocksize }
-            else { (cols / blocksize) + 1 };
+        let num_blocks = if cols % blocksize == 0 {
+            cols / blocksize
+        } else {
+            (cols / blocksize) + 1
+        };
 
         for sec in 0..num_blocks {
             let i0 = sec * blocksize;
-            let i1 = min(cols, (sec+1) * blocksize);
+            let i1 = min(cols, (sec + 1) * blocksize);
 
-            let mut chunks: FxHashMap<Vec<u8>,usize> =
-                FxHashMap::default();
+            let mut chunks: FxHashMap<Vec<u8>, usize> = FxHashMap::default();
             for r in pivot_row..rows {
-                let ch = self.d[r][i0..i1].to_vec();
-                if ch.iter().all(|&x| x == 0) { continue; }
+                let ch = self.0[r][i0..i1].to_vec();
+                if ch.iter().all(|&x| x == 0) {
+                    continue;
+                }
                 if let Some(&r1) = chunks.get(&ch) {
                     self.row_add(r1, r);
                     x.row_add(r1, r);
@@ -155,14 +162,14 @@ impl Mat2 {
 
             for p in i0..i1 {
                 for r0 in pivot_row..rows {
-                    if self.d[r0][p] != 0 {
+                    if self.0[r0][p] != 0 {
                         if r0 != pivot_row {
                             self.row_add(r0, pivot_row);
                             x.row_add(r0, pivot_row);
                         }
 
-                        for r1 in pivot_row+1..rows {
-                            if self.d[r1][p] != 0 {
+                        for r1 in pivot_row + 1..rows {
+                            if self.0[r1][p] != 0 {
                                 self.row_add(pivot_row, r1);
                                 x.row_add(pivot_row, r1);
                             }
@@ -185,15 +192,16 @@ impl Mat2 {
             while sec != 0 {
                 sec -= 1;
                 let i0 = sec * blocksize;
-                let i1 = min(cols, (sec+1) * blocksize);
+                let i1 = min(cols, (sec + 1) * blocksize);
 
-                let mut chunks: FxHashMap<Vec<u8>,usize> =
-                    FxHashMap::default();
+                let mut chunks: FxHashMap<Vec<u8>, usize> = FxHashMap::default();
                 let mut r = pivot_row + 1;
                 while r != 0 {
                     r -= 1;
-                    let ch = self.d[r][i0..i1].to_vec();
-                    if ch.iter().all(|&x| x == 0) { continue; }
+                    let ch = self.0[r][i0..i1].to_vec();
+                    if ch.iter().all(|&x| x == 0) {
+                        continue;
+                    }
                     if let Some(&r1) = chunks.get(&ch) {
                         self.row_add(r1, r);
                         x.row_add(r1, r);
@@ -204,15 +212,19 @@ impl Mat2 {
 
                 loop {
                     if let Some(&pcol) = pivot_cols1.last() {
-                        if i0 > pcol || pcol >= i1 { break; }
+                        if i0 > pcol || pcol >= i1 {
+                            break;
+                        }
                         pivot_cols1.pop();
                         for r in 0..pivot_row {
-                            if self.d[r][pcol] != 0 {
+                            if self.0[r][pcol] != 0 {
                                 self.row_add(pivot_row, r);
                                 x.row_add(pivot_row, r);
                             }
                         }
-                        if pivot_row > 0 { pivot_row -= 1; }
+                        if pivot_row > 0 {
+                            pivot_row -= 1;
+                        }
                     } else {
                         break;
                     }
@@ -235,13 +247,13 @@ impl Mat2 {
         m.gauss(false)
     }
 
-    pub fn inverse(&self) -> Option<Mat2> {
+    pub fn inverse(&self) -> Option<Self> {
         if self.num_rows() != self.num_cols() {
             return None;
         }
 
         let mut m = self.clone();
-        let mut inv = Mat2::id(self.num_rows());
+        let mut inv = Self::id(self.num_rows());
         let rank = m.gauss_helper(true, 3, &mut inv, &mut vec![]);
 
         if rank < self.num_rows() {
@@ -253,92 +265,109 @@ impl Mat2 {
 
     /// Return the hamming weight of the given row
     pub fn row_weight(&self, i: usize) -> u8 {
-        self.d[i].iter().sum::<u8>()
+        self.0[i].iter().sum()
     }
 
     /// Return the hamming weight of the whole matrix
     pub fn weight(&self) -> u8 {
-        self.d.iter().map(|r| r.iter().sum::<u8>()).sum::<u8>()
+        self.0.iter().map(|r| r.iter().sum::<u8>()).sum()
     }
 
     /// Return a list of rows which have a single 1
     pub fn unit_rows(&self) -> Vec<usize> {
-        self.d.iter().enumerate().filter_map(|(i,r)| {
-            if r.iter().sum::<u8>() == 1 { Some(i) }
-            else { None }
-        }).collect()
+        self.0
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                if r.iter().sum::<u8>() == 1 {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
 impl RowOps for Mat2 {
     fn row_add(&mut self, r0: usize, r1: usize) {
         for i in 0..self.num_cols() {
-            self.d[r1][i] = self.d[r0][i] ^ self.d[r1][i];
+            self.0[r1][i] = self.0[r0][i] ^ self.0[r1][i];
         }
     }
 
-
     fn row_swap(&mut self, r0: usize, r1: usize) {
-        self.d.swap(r0, r1);
+        self.0.swap(r0, r1);
     }
 }
 
 impl ColOps for Mat2 {
     fn col_add(&mut self, c0: usize, c1: usize) {
         for i in 0..self.num_rows() {
-            self.d[i][c1] = self.d[i][c0] ^ self.d[i][c1];
+            self.0[i][c1] = self.0[i][c0] ^ self.0[i][c1];
         }
     }
 
     fn col_swap(&mut self, c0: usize, c1: usize) {
         for i in 0..self.num_rows() {
-            self.d[i].swap(c0, c1);
+            self.0[i].swap(c0, c1);
         }
     }
 }
 
 impl fmt::Display for Mat2 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for row in &self.d {
+        for row in &self.0 {
             write!(f, "[ ")?;
-            for x in row { write!(f, "{} ", x)?; }
+            for x in row {
+                write!(f, "{} ", x)?;
+            }
             write!(f, "]\n")?;
         }
         Ok(())
     }
 }
 
-impl std::ops::Index<(usize,usize)> for Mat2 {
+impl std::ops::Index<(usize, usize)> for Mat2 {
     type Output = u8;
-    fn index(&self, idx: (usize,usize)) -> &Self::Output { &self.d[idx.0][idx.1] }
+    fn index(&self, idx: (usize, usize)) -> &Self::Output {
+        &self.0[idx.0][idx.1]
+    }
 }
 
-impl std::ops::IndexMut<(usize,usize)> for Mat2 {
-    fn index_mut(&mut self, idx: (usize,usize)) -> &mut Self::Output { &mut self.d[idx.0][idx.1] }
+impl std::ops::IndexMut<(usize, usize)> for Mat2 {
+    fn index_mut(&mut self, idx: (usize, usize)) -> &mut Self::Output {
+        &mut self.0[idx.0][idx.1]
+    }
 }
 
 impl std::ops::Index<usize> for Mat2 {
     type Output = Vec<u8>;
-    fn index(&self, idx: usize) -> &Self::Output { &self.d[idx] }
+    fn index(&self, idx: usize) -> &Self::Output {
+        &self.0[idx]
+    }
 }
 
 impl std::ops::IndexMut<usize> for Mat2 {
-    fn index_mut(&mut self, idx: usize) -> &mut Self::Output { &mut self.d[idx] }
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        &mut self.0[idx]
+    }
 }
 
 impl<'a, 'b> std::ops::Mul<&'b Mat2> for &'a Mat2 {
     type Output = Mat2;
 
     fn mul(self, rhs: &Mat2) -> Self::Output {
-        if self.num_cols() != rhs.num_rows() {
-            panic!("Cannot multiply matrices with mismatched dimensions.");
-        }
+        assert!(
+            self.num_cols() == rhs.num_rows(),
+            "Cannot multiply matrices with mismatched dimensions."
+        );
 
         let k = self.num_cols();
-        Mat2::build(self.num_rows(), rhs.num_cols(), |x,y| {
+        Mat2::build(self.num_rows(), rhs.num_cols(), |x, y| {
             let mut b = 0;
             for i in 0..k {
-                b = b ^ (self.d[x][i] & rhs.d[i][y]);
+                b = b ^ (self.0[x][i] & rhs.0[i][y]);
             }
             b == 1
         })
@@ -347,13 +376,22 @@ impl<'a, 'b> std::ops::Mul<&'b Mat2> for &'a Mat2 {
 
 impl<'a> std::ops::Mul<Mat2> for &'a Mat2 {
     type Output = Mat2;
-    fn mul(self, rhs: Mat2) -> Self::Output { self * &rhs } }
+    fn mul(self, rhs: Mat2) -> Self::Output {
+        self * &rhs
+    }
+}
 impl<'a> std::ops::Mul<&'a Mat2> for Mat2 {
-    type Output = Mat2;
-    fn mul(self, rhs: &Mat2) -> Self::Output { &self * rhs } }
+    type Output = Self;
+    fn mul(self, rhs: &Self) -> Self {
+        &self * rhs
+    }
+}
 impl std::ops::Mul<Mat2> for Mat2 {
-    type Output = Mat2;
-    fn mul(self, rhs: Mat2) -> Self::Output { &self * &rhs } }
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        &self * &rhs
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -361,35 +399,18 @@ mod tests {
 
     #[test]
     fn mat_mul() {
-        let v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 0, 1, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 0, 1, 1]]);
 
-        let w = Mat2::new(vec![
-            vec![1, 1],
-            vec![1, 0],
-            vec![0, 0],
-            vec![0, 1],
-        ]);
+        let w = Mat2::new(vec![vec![1, 1], vec![1, 0], vec![0, 0], vec![0, 1]]);
 
-        let u = Mat2::new(vec![
-            vec![1, 1],
-            vec![0, 0],
-            vec![0, 1],
-        ]);
+        let u = Mat2::new(vec![vec![1, 1], vec![0, 0], vec![0, 1]]);
 
         assert_eq!(&v * &w, u);
     }
 
     #[test]
     fn transpose() {
-        let v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 0, 1, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 0, 1, 1]]);
 
         let vt = Mat2::new(vec![
             vec![1, 1, 0],
@@ -403,16 +424,12 @@ mod tests {
 
     #[test]
     fn unit_vecs() {
-        let v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 0, 1, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 0, 1, 1]]);
 
-        let c0 = Mat2::new(vec![vec![1,1,0]]).transpose();
-        let c1 = Mat2::new(vec![vec![0,1,0]]).transpose();
-        let c2 = Mat2::new(vec![vec![1,1,1]]).transpose();
-        let c3 = Mat2::new(vec![vec![0,1,1]]).transpose();
+        let c0 = Mat2::new(vec![vec![1, 1, 0]]).transpose();
+        let c1 = Mat2::new(vec![vec![0, 1, 0]]).transpose();
+        let c2 = Mat2::new(vec![vec![1, 1, 1]]).transpose();
+        let c3 = Mat2::new(vec![vec![0, 1, 1]]).transpose();
 
         assert_eq!(&v * Mat2::unit_vector(4, 0), c0);
         assert_eq!(&v * Mat2::unit_vector(4, 1), c1);
@@ -422,23 +439,11 @@ mod tests {
 
     #[test]
     fn row_ops() {
-        let mut v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 0, 1, 1],
-        ]);
+        let mut v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 0, 1, 1]]);
 
-        let w1 = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![1, 1, 0, 0],
-        ]);
+        let w1 = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![1, 1, 0, 0]]);
 
-        let w2 = Mat2::new(vec![
-            vec![1, 1, 1, 1],
-            vec![1, 0, 1, 0],
-            vec![1, 1, 0, 0],
-        ]);
+        let w2 = Mat2::new(vec![vec![1, 1, 1, 1], vec![1, 0, 1, 0], vec![1, 1, 0, 0]]);
 
         v.row_add(1, 2);
         assert_eq!(v, w1);
@@ -482,40 +487,23 @@ mod tests {
 
     #[test]
     fn ranks() {
-        let v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 0, 1, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 0, 1, 1]]);
         assert_eq!(v.rank(), 3);
 
-        let v = Mat2::new(vec![
-            vec![1, 0, 1, 0],
-            vec![1, 1, 1, 1],
-            vec![0, 1, 0, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 0, 1, 0], vec![1, 1, 1, 1], vec![0, 1, 0, 1]]);
         assert_eq!(v.rank(), 2);
     }
 
     #[test]
     fn inv() {
-        let v = Mat2::new(vec![
-            vec![1, 1, 1],
-            vec![0, 1, 1],
-            vec![0, 0, 1],
-        ]);
+        let v = Mat2::new(vec![vec![1, 1, 1], vec![0, 1, 1], vec![0, 0, 1]]);
         assert_eq!(v.rank(), 3);
 
         let vi = v.inverse().expect("v should be invertible");
         assert_eq!(&v * &vi, Mat2::id(3));
         assert_eq!(&vi * &v, Mat2::id(3));
 
-        let vi_exp = Mat2::new(vec![
-            vec![1, 1, 0],
-            vec![0, 1, 1],
-            vec![0, 0, 1],
-        ]);
+        let vi_exp = Mat2::new(vec![vec![1, 1, 0], vec![0, 1, 1], vec![0, 0, 1]]);
         assert_eq!(vi_exp, vi);
     }
 }
-

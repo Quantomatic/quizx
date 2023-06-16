@@ -14,24 +14,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-use std::str;
-use num::{Rational,Zero};
-use std::collections::VecDeque;
-use crate::scalar::Mod2;
 use crate::gate::*;
 use crate::graph::*;
 use crate::linalg::RowOps;
+use crate::scalar::Mod2;
+use num::{Rational, Zero};
 use openqasm::{ast::Symbol, translate::Value, GenericError, ProgramVisitor};
+use std::collections::VecDeque;
+use std::fmt;
+use std::str;
 
 /// A type for quantum circuits
-#[derive(PartialEq,Eq,Clone,Debug)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Circuit {
     nqubits: usize,
-    pub gates: VecDeque<Gate>
+    pub gates: VecDeque<Gate>,
 }
 
-#[derive(PartialEq,Eq,Clone,Copy,Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct CircuitStats {
     pub qubits: usize,
     pub total: usize,
@@ -43,32 +43,58 @@ pub struct CircuitStats {
 }
 
 impl CircuitStats {
-    pub fn make(c: &Circuit) -> Self {
-        let mut s = CircuitStats { qubits: c.num_qubits(), total: c.num_gates(),
-          oneq: 0, twoq: 0, moreq: 0, cliff: 0, non_cliff: 0, };
+    pub fn new(c: &Circuit) -> Self {
+        let mut s = Self {
+            qubits: c.num_qubits(),
+            total: c.num_gates(),
+            oneq: 0,
+            twoq: 0,
+            moreq: 0,
+            cliff: 0,
+            non_cliff: 0,
+        };
         for g in &c.gates {
             match g.qs.len() {
-                1 => { s.oneq += 1; },
-                2 => { s.twoq += 1; },
-                _ => { s.moreq += 1; },
+                1 => {
+                    s.oneq += 1;
+                }
+                2 => {
+                    s.twoq += 1;
+                }
+                _ => {
+                    s.moreq += 1;
+                }
             }
 
             match g.t {
-                NOT | Z | S | Sdg | CNOT | CZ | SWAP | HAD => { s.cliff += 1; },
+                NOT | Z | S | Sdg | CNOT | CZ | SWAP | HAD => {
+                    s.cliff += 1;
+                }
                 ZPhase | XPhase => {
-                    if *g.phase.denom() == 1 ||
-                       *g.phase.denom() == 2
-                    { s.cliff += 1; }
-                    else { s.non_cliff += 1; }
-                },
-                _ => { s.non_cliff += 1; }
+                    if *g.phase.denom() == 1 || *g.phase.denom() == 2 {
+                        s.cliff += 1;
+                    } else {
+                        s.non_cliff += 1;
+                    }
+                }
+                _ => {
+                    s.non_cliff += 1;
+                }
             }
         }
         s
     }
 
     pub fn into_array(self) -> [usize; 7] {
-        [self.qubits, self.total, self.oneq, self.twoq, self.moreq, self.cliff, self.non_cliff]
+        [
+            self.qubits,
+            self.total,
+            self.oneq,
+            self.twoq,
+            self.moreq,
+            self.cliff,
+            self.non_cliff,
+        ]
     }
 }
 
@@ -79,23 +105,23 @@ impl fmt::Display for CircuitStats {
 }
 
 impl Circuit {
-    pub fn new(nqubits: usize) -> Circuit {
-        Circuit {
+    pub fn new(nqubits: usize) -> Self {
+        Self {
             gates: VecDeque::new(),
-            nqubits
+            nqubits,
         }
     }
 
-    pub fn num_qubits(&self) -> usize { self.nqubits }
+    pub fn num_qubits(&self) -> usize {
+        self.nqubits
+    }
 
-    pub fn num_gates(&self) -> usize { self.gates.len() }
+    pub fn num_gates(&self) -> usize {
+        self.gates.len()
+    }
 
     pub fn num_gates_of_type(&self, t: GType) -> usize {
-        let mut n = 0;
-        for g in &self.gates {
-            if g.t == t { n += 1; }
-        }
-        n
+        self.gates.iter().filter(|g| g.t == t).count()
     }
 
     pub fn push(&mut self, g: Gate) {
@@ -110,13 +136,16 @@ impl Circuit {
         self.gates.push_front(g);
     }
 
-    pub fn add_gate_with_phase(&mut self, name: &str,
-                               qs: Vec<usize>, phase: Rational)
-    {
+    pub fn extend(&mut self, iter: impl IntoIterator<Item = Gate>) {
+        self.gates.extend(iter)
+    }
+
+    pub fn add_gate_with_phase(&mut self, name: &str, qs: Vec<usize>, phase: Rational) {
         self.push(Gate {
             t: GType::from_qasm_name(name),
             qs,
-            phase: phase.mod2() });
+            phase: phase.mod2(),
+        });
     }
 
     pub fn add_gate(&mut self, name: &str, qs: Vec<usize>) {
@@ -134,23 +163,23 @@ impl Circuit {
         }
     }
 
-    pub fn to_adjoint(&self) -> Circuit {
+    pub fn to_adjoint(&self) -> Self {
         let mut c = self.clone();
         c.adjoint();
         c
     }
 
     pub fn to_qasm(&self) -> String {
-        String::from("OPENQASM 2.0;\ninclude \"qelib1.inc\";\n") +
-            &self.to_string()
+        String::from("OPENQASM 2.0;\ninclude \"qelib1.inc\";\n") + &self.to_string()
     }
 
-    fn from_qasm_parser(read: impl FnOnce(&mut openqasm::Parser)) -> Result<Circuit, String> {
+    fn from_qasm_parser(read: impl FnOnce(&mut openqasm::Parser)) -> Result<Self, String> {
         let mut cache = openqasm::SourceCache::new();
         let mut parser = openqasm::Parser::new(&mut cache)
             .with_file_policy(openqasm::parser::FilePolicy::Ignore);
         read(&mut parser);
-        parser.parse_source::<String>("
+        parser.parse_source::<String>(
+            "
             opaque rz(phase) q;
             opaque rx(phase) q;
             opaque x q;
@@ -168,37 +197,49 @@ impl Circuit {
             opaque xcx a, b;
             opaque init_anc a;
             opaque post_sel a;
-        ".to_string(), None);
+        "
+            .to_string(),
+            None,
+        );
 
         let program = parser.done().to_errors().map_err(|e| e.to_string())?;
-        program.type_check().to_errors().map_err(|e| e.to_string())?;
+        program
+            .type_check()
+            .to_errors()
+            .map_err(|e| e.to_string())?;
 
-        let mut writer = CircuitWriter { circuit: Circuit::new(0) };
+        let mut writer = CircuitWriter {
+            circuit: Self::new(0),
+        };
         let mut linearize = openqasm::Linearize::new(&mut writer, usize::MAX);
-        linearize.visit_program(&program).to_errors().map_err(|e| e.to_string())?;
+        linearize
+            .visit_program(&program)
+            .to_errors()
+            .map_err(|e| e.to_string())?;
 
-        Ok(writer.circuit)  
-    } 
-
-    pub fn from_qasm(source: &str) -> Result<Circuit, String> {
-        Circuit::from_qasm_parser(|parser| {
-            parser.parse_source::<String>(source.to_string(), None)
-        })
+        Ok(writer.circuit)
     }
 
-    pub fn from_file(name: &str) -> Result<Circuit, String> {
-        Circuit::from_qasm_parser(|parser| {
-            parser.parse_file(name)
-        })
+    pub fn from_qasm(source: &str) -> Result<Self, String> {
+        Self::from_qasm_parser(|parser| parser.parse_source::<String>(source.to_string(), None))
+    }
+
+    pub fn from_file(name: &str) -> Result<Self, String> {
+        Self::from_qasm_parser(|parser| parser.parse_file(name))
     }
 
     /// returns a copy of the circuit, decomposed into 1- and 2-qubit Clifford +
     /// phase gates.
-    pub fn to_basic_gates(&self) -> Circuit {
+    pub fn to_basic_gates(&self) -> Self {
         // calculate the space needed in advance
         let sz = self.gates.iter().map(|g| g.num_basic_gates()).sum();
-        let mut c = Circuit { gates: VecDeque::with_capacity(sz), nqubits: self.nqubits };
-        for g in &self.gates { g.push_basic_gates(&mut c); }
+        let mut c = Self {
+            gates: VecDeque::with_capacity(sz),
+            nqubits: self.nqubits,
+        };
+        for g in &self.gates {
+            g.push_basic_gates(&mut c);
+        }
 
         c
     }
@@ -215,7 +256,7 @@ impl Circuit {
                 ty: VType::B,
                 phase: Rational::zero(),
                 qubit: i as i32,
-                row: 1
+                row: 1,
             });
             qs.push(Some(v));
             inputs.push(v);
@@ -227,19 +268,23 @@ impl Circuit {
             g.add_to_graph(&mut graph, &mut qs, postselect);
         }
 
-        let last_row = qs.iter()
-            .map(|&v| match v { Some(v1) => graph.row(v1), None => 0 })
+        let last_row = qs
+            .iter()
+            .map(|&v| match v {
+                Some(v1) => graph.row(v1),
+                None => 0,
+            })
             .max()
             .unwrap_or(0);
 
         let mut outputs = Vec::with_capacity(self.nqubits);
-        for (i,&q) in qs.iter().enumerate() {
+        for (i, &q) in qs.iter().enumerate() {
             if let Some(v0) = q {
                 let v = graph.add_vertex_with_data(VData {
                     ty: VType::B,
                     phase: Rational::zero(),
                     qubit: i as i32,
-                    row: last_row + 1
+                    row: last_row + 1,
                 });
                 graph.add_edge(v0, v);
                 outputs.push(v);
@@ -255,7 +300,7 @@ impl Circuit {
     }
 
     pub fn stats(&self) -> CircuitStats {
-        CircuitStats::make(self)
+        CircuitStats::new(self)
     }
 }
 
@@ -271,36 +316,43 @@ impl fmt::Display for Circuit {
     }
 }
 
-
-impl std::ops::Add<Circuit> for Circuit {
-    type Output = Circuit;
-    fn add(mut self, mut rhs: Circuit) -> Self::Output {
-        if self.num_qubits() != rhs.num_qubits() {
-            panic!("Cannot append circuits with different numbers of qubits");
-        }
+impl std::ops::Add<Self> for Circuit {
+    type Output = Self;
+    fn add(mut self, mut rhs: Self) -> Self {
+        assert!(
+            self.num_qubits() == rhs.num_qubits(),
+            "Cannot append circuits with different numbers of qubits"
+        );
         self.gates.append(&mut rhs.gates);
         self
     }
 }
 
-impl std::ops::Add<&Circuit> for Circuit {
-    type Output = Circuit;
-    fn add(mut self, rhs: &Circuit) -> Self::Output {
-        if self.num_qubits() != rhs.num_qubits() {
-            panic!("Cannot append circuits with different numbers of qubits");
-        }
-        self.gates.extend(rhs.gates.iter().cloned());
+impl std::ops::Add<&Self> for Circuit {
+    type Output = Self;
+    fn add(mut self, rhs: &Self) -> Self {
+        assert!(
+            self.num_qubits() == rhs.num_qubits(),
+            "Cannot append circuits with different numbers of qubits"
+        );
+        self.extend(rhs.gates.iter().cloned());
         self
     }
 }
 
 impl std::ops::Add<Circuit> for &Circuit {
     type Output = Circuit;
-    fn add(self, rhs: Circuit) -> Self::Output { self.clone().add(rhs) } }
+    fn add(self, rhs: Circuit) -> Self::Output {
+        self.clone().add(rhs)
+    }
+}
 
 impl std::ops::Add<&Circuit> for &Circuit {
     type Output = Circuit;
-    fn add(self, rhs: &Circuit) -> Self::Output { self.clone().add(rhs) } }
+    fn add(self, rhs: &Circuit) -> Self::Output {
+        self.clone().add(rhs)
+    }
+}
 
 impl std::ops::AddAssign<&Circuit> for Circuit {
     fn add_assign(&mut self, rhs: &Self) {
@@ -334,7 +386,7 @@ impl RowOps for Circuit {
 }
 
 struct CircuitWriter {
-    circuit: Circuit
+    circuit: Circuit,
 }
 
 #[derive(Debug)]
@@ -343,17 +395,17 @@ enum CircuitWriterError {
     BarrierNotSupported,
     ResetNotSupported,
     MeasureNotSupported,
-    ConditionalNotSupported
+    ConditionalNotSupported,
 }
 
 impl std::fmt::Display for CircuitWriterError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            CircuitWriterError::UnitaryNotSupported => write!(f, "arbitrary unitaries are not supported"),
-            CircuitWriterError::BarrierNotSupported => write!(f, "barriers are not supported"),
-            CircuitWriterError::ResetNotSupported => write!(f, "resets are not supported"),
-            CircuitWriterError::MeasureNotSupported => write!(f, "measurements are not supported"),
-            CircuitWriterError::ConditionalNotSupported => write!(f, "conditionals are not supported"),
+            Self::UnitaryNotSupported => write!(f, "arbitrary unitaries are not supported"),
+            Self::BarrierNotSupported => write!(f, "barriers are not supported"),
+            Self::ResetNotSupported => write!(f, "resets are not supported"),
+            Self::MeasureNotSupported => write!(f, "measurements are not supported"),
+            Self::ConditionalNotSupported => write!(f, "conditionals are not supported"),
         }
     }
 }
@@ -373,13 +425,19 @@ impl openqasm::GateWriter for &mut CircuitWriter {
         Ok(())
     }
 
-    fn write_opaque(&mut self, name: &Symbol, params: &[Value], regs: &[usize]) -> Result<(), Self::Error> {
+    fn write_opaque(
+        &mut self,
+        name: &Symbol,
+        params: &[Value],
+        regs: &[usize],
+    ) -> Result<(), Self::Error> {
         fn param_to_ratio(value: Value) -> num::Rational {
             if value.a.is_zero() {
                 num::Rational::new(*value.b.numer() as isize, *value.b.denom() as isize).mod2()
             } else {
                 let a = *value.a.numer() as f32 / *value.a.denom() as f32;
-                let mut p = num::Rational::approximate_float(a / std::f32::consts::PI).unwrap_or(0.into());
+                let mut p =
+                    num::Rational::approximate_float(a / std::f32::consts::PI).unwrap_or(0.into());
                 p += num::Rational::new(*value.b.numer() as isize, *value.b.denom() as isize);
                 p.mod2()
             }
@@ -397,27 +455,27 @@ impl openqasm::GateWriter for &mut CircuitWriter {
     }
 
     fn write_u(&mut self, _: Value, _: Value, _: Value, _: usize) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::UnitaryNotSupported)
+        Err(Self::Error::UnitaryNotSupported)
     }
 
     fn write_barrier(&mut self, _: &[usize]) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::BarrierNotSupported)
+        Err(Self::Error::BarrierNotSupported)
     }
 
     fn write_reset(&mut self, _: usize) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::ResetNotSupported)
+        Err(Self::Error::ResetNotSupported)
     }
 
     fn write_measure(&mut self, _: usize, _: usize) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::MeasureNotSupported)
+        Err(Self::Error::MeasureNotSupported)
     }
 
     fn start_conditional(&mut self, _: usize, _: usize, _: u64) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::ConditionalNotSupported)
+        Err(Self::Error::ConditionalNotSupported)
     }
 
     fn end_conditional(&mut self) -> Result<(), Self::Error> {
-        Err(CircuitWriterError::ConditionalNotSupported)
+        Err(Self::Error::ConditionalNotSupported)
     }
 }
 
@@ -454,17 +512,17 @@ mod tests {
     #[test]
     fn mk_circuit_with_phase() {
         let mut c = Circuit::new(1);
-        c.add_gate_with_phase("rz", vec![0], Rational::new(1,1));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(1,1));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(1,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(1,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(2,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(2,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(-1,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(-1,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(-1,3));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(1,1));
-        c.add_gate_with_phase("rz", vec![0], Rational::new(-1,2));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(1, 1));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(1, 1));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(1, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(1, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(2, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(2, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(-1, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(-1, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(-1, 3));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(1, 1));
+        c.add_gate_with_phase("rz", vec![0], Rational::new(-1, 2));
 
         let qasm = r#"
             OPENQASM 2.0;
@@ -512,10 +570,13 @@ mod tests {
 
     #[test]
     fn tograph_cz() {
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
         qreg q[2];
         cz q[0], q[1];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let h: Graph = c.to_graph();
         let mut g = Graph::new();
@@ -525,29 +586,32 @@ mod tests {
         g.add_vertex(VType::Z);
         g.add_vertex(VType::B);
         g.add_vertex(VType::B);
-        g.add_edge(0,2);
-        g.add_edge(1,3);
-        g.add_edge_with_type(2,3,EType::H);
-        g.add_edge(2,4);
-        g.add_edge(3,5);
-        g.set_inputs(vec![0,1]);
-        g.set_outputs(vec![4,5]);
+        g.add_edge(0, 2);
+        g.add_edge(1, 3);
+        g.add_edge_with_type(2, 3, EType::H);
+        g.add_edge(2, 4);
+        g.add_edge(3, 5);
+        g.set_inputs(vec![0, 1]);
+        g.set_outputs(vec![4, 5]);
         g.scalar_mut().mul_sqrt2_pow(1);
 
         println!("g = {}\n\nh = {}\n\n", g.to_dot(), h.to_dot());
 
-        assert_eq!(c.to_tensor4(), Tensor::cphase(Rational::new(1,1), 2));
-        assert_eq!(g.to_tensor4(), Tensor::cphase(Rational::new(1,1), 2));
+        assert_eq!(c.to_tensor4(), Tensor::cphase(Rational::new(1, 1), 2));
+        assert_eq!(g.to_tensor4(), Tensor::cphase(Rational::new(1, 1), 2));
     }
 
     #[test]
     fn tograph_3cnot() {
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
             qreg q[2];
             cx q[0], q[1];
             cx q[1], q[0];
             cx q[0], q[1];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let g: Graph = c.to_graph();
 
@@ -558,22 +622,28 @@ mod tests {
 
     #[test]
     fn tograph_more() {
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
             qreg q[3];
             ccz q[0], q[1], q[2];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let g: Graph = c.to_graph();
         assert_eq!(c.to_tensor4(), g.to_tensor4());
 
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
             qreg q[4];
             h q[1];
             ccx q[0], q[1], q[2];
             ccx q[1], q[2], q[3];
             h q[2];
             z q[0];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
 
         let g: Graph = c.to_graph();
         assert_eq!(c.to_tensor4(), g.to_tensor4());
@@ -581,17 +651,23 @@ mod tests {
 
     #[test]
     fn tograph_postsel() {
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
             qreg q[3];
             ccz q[0], q[1], q[2];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         let g: Graph = c.to_graph_with_options(true);
         assert_eq!(c.to_tensor4(), g.to_tensor4());
 
-        let c = Circuit::from_qasm(r#"
+        let c = Circuit::from_qasm(
+            r#"
             qreg q[3];
             ccx q[0], q[1], q[2];
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         let g: Graph = c.to_graph_with_options(true);
         assert_eq!(c.to_tensor4(), g.to_tensor4());
     }
